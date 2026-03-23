@@ -1,6 +1,11 @@
 #Import
 import pandas as pd
 from datetime import datetime
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, r2_score
+import matplotlib.pyplot as plt
+import numpy as np
 
 #Visualization console options
 pd.set_option('display.max_columns', None)
@@ -30,7 +35,7 @@ df.drop(["host_name"], axis=1, inplace=True)
 df.drop(["license"], axis=1, inplace=True)
 
 #remove duplicates if exists
-print("duplicates.count: ",df.duplicated().sum())
+#print("duplicates.count: ",df.duplicated().sum())
 
 #remove reviews_per_month because redundant after last year filter
 df.drop(["reviews_per_month"], axis=1, inplace=True)
@@ -50,48 +55,77 @@ for d in date_list:
 df["last_review_days"] = days_diff
 df.drop(["last_review"], axis=1, inplace=True)
 
+#drop rows with too high price
+df = df[df["price"]<=600]
+
 #adapt features for model
-#OHE for neighbourhoods and room type
+#OHE for room type
 #print(df['room_type'].value_counts())
-df = pd.get_dummies(df, columns=['neighbourhood'], drop_first=True)
 df = pd.get_dummies(df, columns=['room_type'], drop_first=True)
 
-#Pipeline di ML
+#target encoding for neighbourhoods
+mean_prices = df.groupby('neighbourhood')['price'].mean()
+df['neighbourhood_avg_price'] = df['neighbourhood'].map(mean_prices)
+print(df.head())
 
+df.drop(['neighbourhood'], axis=1, inplace=True)
+
+'''
 print(df.head())
 print(df.info())
 print(df.describe())
-'''from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, r2_score
+'''
 
-# 1. Prepariamo X e y
-# Sostituisci 'price' con il nome esatto della tua colonna target
+##test without availability
+df.drop(["availability_365", "last_review_days", "number_of_reviews"], axis=1, inplace=True)
+
+#Pipeline di ML
+
 y = df['price']
-X = df.drop(columns=['price']) 
-
-# Assicurati di aver tolto eventuali colonne testuali residue (es. nomi, ID)
-# X = X.select_dtypes(include=['number']) 
-
-# 2. Dividiamo i dati (80% training, 20% test)
+X = df.drop(columns=['price'])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 3. Creiamo il modello Random Forest
-# n_estimators è il numero di alberi (100 è un buon punto di partenza)
-model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+model = RandomForestRegressor(n_estimators=200, random_state=42)
 
-# 4. Allenamento
-print("Allenamento in corso...")
+print("Training in progress...")
 model.fit(X_train, y_train)
 
-# 5. Predizione e Valutazione
 predictions = model.predict(X_test)
-mae = mean_absolute_error(y_test, predictions)
+#metrics
 r2 = r2_score(y_test, predictions)
+mae = mean_absolute_error(y_test, predictions)
+mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
 
-print(f"--- Risultati ---")
-print(f"Errore Medio Assoluto (MAE): {mae:.2f}€")
-print(f"Coefficiente R^2 (Precisione): {r2:.2f}")
+print(f"--- Results ---")
+print(f"Coefficient R^2 (Precision): {r2:.2f}")
+print(f"Mean Absolute Error (MAE): {mae:.2f}€")
+print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
 
 ##RICORDATI DI FARE OOP
-'''
+
+#Features importance
+importances = model.feature_importances_
+feature_names = X.columns
+feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances}).sort_values(by='Importance', ascending=False)
+
+print("\n--- Feature Importance  ---")
+print(feature_importance_df)
+
+###
+print("\n--- Stats Real Price vs Predicted ---")
+print(f"Mean Real Price: {y_test.mean():.2f}€")
+print(f"Mean Predicted Price: {predictions.mean():.2f}€")
+print(f"Max Real Price: {y_test.max():.2f}€")
+print(f"Max Predicted Price: {predictions.max():.2f}€")
+
+##
+plt.figure(figsize=(10, 6))
+plt.scatter(y_test, predictions, alpha=0.5)
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+plt.xlabel('Real Price')
+plt.ylabel('Predicted Price')
+plt.title('Real vs Predicted')
+plt.show()
+
+
+#Prova a togliere shared rooms a hotel rooms
