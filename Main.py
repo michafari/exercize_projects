@@ -10,127 +10,124 @@ import numpy as np
 #Visualization console options
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_colwidth', None)
-pd.set_option('display.width', 150)
+pd.set_option('display.width', 300)
 
-#Import file cvs and dataset analysis (by creating dataframe)
-df = pd.read_csv('listings.csv')
 
-#initial dataset cleaning
-df_original = df.copy()
-df.drop(["neighbourhood_group"], axis=1, inplace=True)
+def read_csv(path):
+    df = pd.read_csv(path)
+    return df
 
-#Initial features analysis
-#notes
-##data cleaning
 
-#at least one recension in last 12 months to rely on actual price
-df = df[df['number_of_reviews_ltm']>=1]
-#drop data without price
-df = df.dropna(subset=['price'])
-#drop unuseful columns
-df.drop(["id"], axis=1, inplace=True)
-df.drop(["name"], axis=1, inplace=True)
-df.drop(["host_id"], axis=1, inplace=True)
-df.drop(["host_name"], axis=1, inplace=True)
-df.drop(["license"], axis=1, inplace=True)
+def clean_data(df):
+    #drop all null column
+    df.drop(["neighbourhood_group"], axis=1, inplace=True)
+    # drop data without price
+    df = df.dropna(subset=['price'])
+    # drop unuseful columns
+    df.drop(["id"], axis=1, inplace=True)
+    df.drop(["name"], axis=1, inplace=True)
+    df.drop(["host_id"], axis=1, inplace=True)
+    df.drop(["host_name"], axis=1, inplace=True)
+    df.drop(["license"], axis=1, inplace=True)
+    return df
 
-#remove duplicates if exists
-#print("duplicates.count: ",df.duplicated().sum())
+def feature_eng(df):
+    # at least one recension in last 12 months to rely on actual price
+    df = df[df['number_of_reviews_ltm'] >= 3]
+    # remove reviews_per_month because redundant after last year filter
+    df.drop(["reviews_per_month"], axis=1, inplace=True)
 
-#remove reviews_per_month because redundant after last year filter
-df.drop(["reviews_per_month"], axis=1, inplace=True)
-#transform last review data into days to last review, create new feature
-today = "2025-09-15"
-date_list = df["last_review"]
+    # transform last review data into days to last review, create new feature
+    today = "2025-09-15"
+    date_list = df["last_review"]
+    date_format = "%Y-%m-%d"
+    today_to_date = datetime.strptime(today, date_format)
+    days_diff = []
+    for d in date_list:
+        d_to_date = datetime.strptime(d, date_format)
+        diff = (today_to_date - d_to_date).days
+        days_diff.append(diff)
+    df["last_review_days"] = days_diff
+    df.drop(["last_review"], axis=1, inplace=True)
 
-date_format = "%Y-%m-%d"
-today_to_date = datetime.strptime(today, date_format)
+    # drop rows with too high price
+    df = df[(df["price"] <= 250) & (df["price"] >= 50)]
+    # drop hotel room e shared room
+    df = df[(df["room_type"] == "Private room") | (df["room_type"] == "Entire home/apt")]
 
-days_diff = []
-for d in date_list:
-    d_to_date = datetime.strptime(d, date_format)
-    diff = (today_to_date-d_to_date).days
-    days_diff.append(diff)
+    # target encoding for neighbourhoods + room_type
+    df['neighborhood_room'] = df['neighbourhood'].astype(str) + "_" + df['room_type'].astype(str)
+    combined_means = df.groupby('neighborhood_room')['price'].mean()
+    df['neigh_room_feature'] = df['neighborhood_room'].map(combined_means)
+    df.drop(['neighbourhood'], axis=1, inplace=True)
+    df.drop(['room_type'], axis=1, inplace=True)
+    df.drop(["neighborhood_room"], axis=1, inplace=True)
 
-df["last_review_days"] = days_diff
-df.drop(["last_review"], axis=1, inplace=True)
+    ##test without columns
+    #df.drop(["latitude", "longitude"], axis=1, inplace=True)
+    #df.drop(["availability_365", "minimum_nights", "number_of_reviews", "calculated_host_listings_count", "number_of_reviews_ltm", "last_review_days"], axis=1, inplace=True)
 
-#drop rows with too high price
-df = df[df["price"]<=400]
+    return df
 
-#drop hotel room e shared room
-df = df[(df["room_type"] == "Private room") | (df["room_type"] == "Entire home/apt")]
+def pipeline(df):
+    y = df['price']
+    X = df.drop(columns=['price'])
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
 
-#adapt features for model
-#OHE for room type
-#print(df['room_type'].value_counts())
-#df = pd.get_dummies(df, columns=['room_type'], drop_first=True)
+    return y_test, predictions, model, X
 
-#target encoding for neighbourhoods + room_type
-df['neighborhood_room'] = df['neighbourhood'].astype(str) + "_" + df['room_type'].astype(str)
 
-combined_means = df.groupby('neighborhood_room')['price'].mean()
-df['geo_room_feature'] = df['neighborhood_room'].map(combined_means)
+def test_analysis(y_test, predictions, model, X):
+    r2 = r2_score(y_test, predictions)
+    mae = mean_absolute_error(y_test, predictions)
+    mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
+    print(f"--- test analysis ---")
+    print(f"Coefficient R^2 (Precision): {r2:.2f}")
+    print(f"Mean Absolute Error (MAE): {mae:.2f}€")
+    print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
+    # Features importance
+    importances = model.feature_importances_
+    feature_names = X.columns
+    feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances}).sort_values(by='Importance', ascending=False)
+    print("\n--- Feature Importance  ---")
+    print(feature_importance_df)
 
-df.drop(['neighbourhood'], axis=1, inplace=True)
-df.drop(['room_type'], axis=1, inplace=True)
-df.drop(["neighborhood_room"], axis=1, inplace=True)
+    return
 
-print(df.head())
-'''
-print(df.head())
-print(df.info())
-print(df.describe())
-'''
+def visualize(y_test, predictions):
+    plt.figure(figsize=(10, 6))
+    plt.scatter(y_test, predictions, alpha=0.5)
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+    plt.xlabel('Real Price')
+    plt.ylabel('Predicted Price')
+    plt.title('Real vs Predicted')
+    plt.show()
+    return
 
-##test without availability
-#df.drop(["availability_365"], axis=1, inplace=True)
 
-#Pipeline di ML
+def main():
+    #import file cvs and creating dataframe
+    dataframe = read_csv('listings.csv')
+    #make a copy
+    df_original = dataframe.copy()
+    #clean dataframe
+    cleaned_dataframe = clean_data(dataframe)
+    #features engineering
+    feat_dataframe = feature_eng(cleaned_dataframe)
+    print(feat_dataframe.head())
+    print(feat_dataframe.describe())
+    #training model output
+    test_prices, predicted_prices, model, Features = pipeline(feat_dataframe)
+    #analysis metrics
+    test_analysis(test_prices, predicted_prices, model, Features)
+    #plot
+    visualize(test_prices, predicted_prices)
 
-y = df['price']
-X = df.drop(columns=['price'])
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    return
 
-model = RandomForestRegressor(n_estimators=100, random_state=42)
+if __name__ == "__main__": #in this way if I import this file in other project it doesn't run everything inside main
+    main()
 
-print("Training in progress...")
-model.fit(X_train, y_train)
-
-predictions = model.predict(X_test)
-#metrics
-r2 = r2_score(y_test, predictions)
-mae = mean_absolute_error(y_test, predictions)
-mape = np.mean(np.abs((y_test - predictions) / y_test)) * 100
-
-print(f"--- Results ---")
-print(f"Coefficient R^2 (Precision): {r2:.2f}")
-print(f"Mean Absolute Error (MAE): {mae:.2f}€")
-print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
-
-#Features importance
-importances = model.feature_importances_
-feature_names = X.columns
-feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances}).sort_values(by='Importance', ascending=False)
-
-print("\n--- Feature Importance  ---")
-print(feature_importance_df)
-
-###
-print("\n--- Stats Real Price vs Predicted ---")
-print(f"Mean Real Price: {y_test.mean():.2f}€")
-print(f"Mean Predicted Price: {predictions.mean():.2f}€")
-print(f"Max Real Price: {y_test.max():.2f}€")
-print(f"Max Predicted Price: {predictions.max():.2f}€")
-
-##
-plt.figure(figsize=(10, 6))
-plt.scatter(y_test, predictions, alpha=0.5)
-plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
-plt.xlabel('Real Price')
-plt.ylabel('Predicted Price')
-plt.title('Real vs Predicted')
-plt.show()
-
-##RICORDATI DI FARE OOP
-#Prova a studiare separatamente private room e entire home
