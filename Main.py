@@ -56,20 +56,27 @@ df["last_review_days"] = days_diff
 df.drop(["last_review"], axis=1, inplace=True)
 
 #drop rows with too high price
-df = df[df["price"]<=600]
+df = df[df["price"]<=400]
+
+#drop hotel room e shared room
+df = df[(df["room_type"] == "Private room") | (df["room_type"] == "Entire home/apt")]
 
 #adapt features for model
 #OHE for room type
 #print(df['room_type'].value_counts())
-df = pd.get_dummies(df, columns=['room_type'], drop_first=True)
+#df = pd.get_dummies(df, columns=['room_type'], drop_first=True)
 
-#target encoding for neighbourhoods
-mean_prices = df.groupby('neighbourhood')['price'].mean()
-df['neighbourhood_avg_price'] = df['neighbourhood'].map(mean_prices)
-print(df.head())
+#target encoding for neighbourhoods + room_type
+df['neighborhood_room'] = df['neighbourhood'].astype(str) + "_" + df['room_type'].astype(str)
+
+combined_means = df.groupby('neighborhood_room')['price'].mean()
+df['geo_room_feature'] = df['neighborhood_room'].map(combined_means)
 
 df.drop(['neighbourhood'], axis=1, inplace=True)
+df.drop(['room_type'], axis=1, inplace=True)
+df.drop(["neighborhood_room"], axis=1, inplace=True)
 
+print(df.head())
 '''
 print(df.head())
 print(df.info())
@@ -77,7 +84,7 @@ print(df.describe())
 '''
 
 ##test without availability
-df.drop(["availability_365", "last_review_days", "number_of_reviews"], axis=1, inplace=True)
+#df.drop(["availability_365"], axis=1, inplace=True)
 
 #Pipeline di ML
 
@@ -85,7 +92,7 @@ y = df['price']
 X = df.drop(columns=['price'])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-model = RandomForestRegressor(n_estimators=200, random_state=42)
+model = RandomForestRegressor(n_estimators=100, random_state=42)
 
 print("Training in progress...")
 model.fit(X_train, y_train)
@@ -100,8 +107,6 @@ print(f"--- Results ---")
 print(f"Coefficient R^2 (Precision): {r2:.2f}")
 print(f"Mean Absolute Error (MAE): {mae:.2f}€")
 print(f"Mean Absolute Percentage Error (MAPE): {mape:.2f}%")
-
-##RICORDATI DI FARE OOP
 
 #Features importance
 importances = model.feature_importances_
@@ -127,5 +132,5 @@ plt.ylabel('Predicted Price')
 plt.title('Real vs Predicted')
 plt.show()
 
-
-#Prova a togliere shared rooms a hotel rooms
+##RICORDATI DI FARE OOP
+#Prova a studiare separatamente private room e entire home
